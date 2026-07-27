@@ -2,11 +2,11 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import time
+from datetime import datetime
 
 st.title("📈 Options Income Screener")
 st.write("Find the best covered call and cash secured put opportunities across your watchlist.")
 
-# --- USER INPUTS ---
 tickers_input = st.text_input("Enter tickers separated by commas", "AAPL, MSFT, GOOGL, AMZN, META")
 min_volume = st.number_input("Minimum volume", value=500, step=100)
 expiry_index = st.selectbox("Expiry", options=[1, 2, 3], format_func=lambda x: f"Expiry #{x} (nearest first)")
@@ -24,8 +24,6 @@ if run:
                 price = ticker.info["currentPrice"]
                 expiry = ticker.options[expiry_index]
 
-                # days to expiry
-                from datetime import datetime
                 days_to_expiry = (datetime.strptime(expiry, "%Y-%m-%d") - datetime.today()).days + 1
                 if days_to_expiry < 1:
                     days_to_expiry = 1
@@ -69,7 +67,9 @@ if run:
                         "Annual Return %": round((best["bid"] / price) * (365 / days_to_expiry) * 100, 1),
                         "Volume": int(best["volume"]) if not pd.isna(best["volume"]) else 0
                     })
-time.sleep(2)            
+
+                time.sleep(2)
+
             except Exception as e:
                 st.warning(f"Skipped {symbol}: {str(e)}")
 
