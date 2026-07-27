@@ -1,6 +1,7 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
+import time
 
 st.title("📈 Options Income Screener")
 st.write("Find the best covered call and cash secured put opportunities across your watchlist.")
@@ -68,7 +69,7 @@ if run:
                         "Annual Return %": round((best["bid"] / price) * (365 / days_to_expiry) * 100, 1),
                         "Volume": int(best["volume"]) if not pd.isna(best["volume"]) else 0
                     })
-
+time.sleep(2)            
             except Exception as e:
                 st.warning(f"Skipped {symbol}: {str(e)}")
 
