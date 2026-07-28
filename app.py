@@ -2,10 +2,17 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import time
+import requests
 from datetime import datetime
 
 st.title("📈 Options Income Screener")
 st.write("Find the best covered call and cash secured put opportunities across your watchlist.")
+
+# Browser header to avoid Yahoo rate limiting
+session = requests.Session()
+session.headers.update({
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/91.0.4472.124 Safari/537.36"
+})
 
 tickers_input = st.text_input("Enter tickers separated by commas", "AAPL, MSFT, GOOGL, AMZN, META")
 min_volume = st.number_input("Minimum volume", value=500, step=100)
