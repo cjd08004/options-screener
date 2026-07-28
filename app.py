@@ -20,7 +20,7 @@ if run:
     with st.spinner("Pulling live options data..."):
         for symbol in watchlist:
             try:
-                ticker = yf.Ticker(symbol)
+                ticker = yf.Ticker(symbol, session=session)
                 price = ticker.info["currentPrice"]
                 expiry = ticker.options[expiry_index]
 
