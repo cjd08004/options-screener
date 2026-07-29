@@ -66,6 +66,8 @@ st.markdown("""
     .stCaption { color: #6c7293 !important; }
     .stProgress > div > div { background: linear-gradient(90deg, #667eea, #764ba2); }
     [data-testid="stSelectbox"] div[data-baseweb="select"] div { color: #ffffff !important; }
+    [data-testid="stSelectbox"] div[data-baseweb="select"] span { color: #ffffff !important; }
+    [data-testid="stSelectbox"] div[data-baseweb="select"] { background-color: #1a1d27 !important; }
     [data-testid="stSelectbox"] div[data-baseweb="popover"] li { color: #1a1a2e !important; }
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
