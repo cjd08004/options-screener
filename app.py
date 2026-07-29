@@ -320,3 +320,10 @@ else:
         <div style="font-size:13px;color:#6c7293;">Set your filters and click Run screener to see today's best options income opportunities.</div>
     </div>
     """, unsafe_allow_html=True)
+
+st.markdown("""
+<div style="text-align:center;color:#6c7293;font-size:11px;margin-top:2rem;padding-top:1rem;border-top:1px solid #2a2d3a;">
+    The Premium Collector is for informational purposes only. Not financial advice. 
+    Options trading involves significant risk. Trade responsibly.
+</div>
+""", unsafe_allow_html=True)
