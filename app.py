@@ -294,7 +294,7 @@ if run:
                     st.dataframe(sector_df, use_container_width=True, hide_index=True)
 
         # Share bar
-        share_url = "https://your-app-url.streamlit.app"
+        share_url = "https://options-screener-nz8kgd62xpbgfsflhwnnrs.streamlit.app"
         st.markdown(f"""
         <div style="background:#1a1d27;border-radius:12px;padding:16px 20px;border:1px solid #2a2d3a;display:flex;align-items:center;justify-content:space-between;margin-top:1rem;">
             <div>
