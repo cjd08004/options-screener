@@ -69,6 +69,13 @@ st.markdown("""
     [data-testid="stSelectbox"] div[data-baseweb="select"] span { color: #ffffff !important; }
     [data-testid="stSelectbox"] div[data-baseweb="select"] { background-color: #1a1d27 !important; }
     [data-testid="stSelectbox"] div[data-baseweb="popover"] li { color: #1a1a2e !important; }
+    div[data-baseweb="select"] span,
+    div[data-baseweb="select"] div,
+    div[data-baseweb="select"] input,
+    div[data-baseweb="select"] p {
+        color: #ffffff !important;
+        background-color: #1a1d27 !important;
+    }
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header {visibility: hidden;}
