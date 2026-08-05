@@ -47,12 +47,12 @@ st.markdown("""
     .metric-sub { font-size: 12px; color: #6c7293; margin-top: 4px; }
     .page-title { font-size: 24px; font-weight: 700; color: #ffffff; margin-bottom: 2px; }
     .page-subtitle { font-size: 13px; color: #6c7293; }
-    .stButton > button {
+    .stButton > button, .stDownloadButton > button {
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         color: white; border: none; border-radius: 8px;
         padding: 12px 24px; font-weight: 600; width: 100%; font-size: 14px; letter-spacing: 0.02em;
     }
-    .stButton > button:hover {
+    .stButton > button:hover, .stDownloadButton > button:hover {
         background: linear-gradient(135deg, #764ba2 0%, #667eea 100%); color: white;
     }
     [data-testid="stDataFrame"] { border-radius: 12px; overflow: hidden; border: 1px solid #2a2d3a !important; }
@@ -65,10 +65,6 @@ st.markdown("""
     .stSidebar .stMarkdown strong { color: #ffffff !important; }
     .stCaption { color: #6c7293 !important; }
     .stProgress > div > div { background: linear-gradient(90deg, #667eea, #764ba2); }
-    [data-testid="stSelectbox"] div[data-baseweb="select"] div { color: #ffffff !important; }
-    [data-testid="stSelectbox"] div[data-baseweb="select"] span { color: #ffffff !important; }
-    [data-testid="stSelectbox"] div[data-baseweb="select"] { background-color: #1a1d27 !important; }
-    [data-testid="stSelectbox"] div[data-baseweb="popover"] li { color: #1a1a2e !important; }
     div[data-baseweb="select"] span,
     div[data-baseweb="select"] div,
     div[data-baseweb="select"] input,
@@ -127,6 +123,25 @@ full_watchlist = {
     "ETFs": ["SPY", "QQQ", "IWM", "GLD", "SLV", "XLE", "XLF", "XLV", "XLK", "TLT"]
 }
 
+# --- CACHED DATA FETCH (15 min TTL — cuts Yahoo requests massively) ---
+@st.cache_data(ttl=900, show_spinner=False)
+def fetch_ticker_data(symbol, expiry_idx):
+    ticker = yf.Ticker(symbol)
+    price = ticker.info.get("currentPrice")
+    if not price:
+        return None
+    expirations = ticker.options
+    if len(expirations) <= expiry_idx:
+        return None
+    expiry = expirations[expiry_idx]
+    chain = ticker.option_chain(expiry)
+    return {
+        "price": price,
+        "expiry": expiry,
+        "calls": chain.calls,
+        "puts": chain.puts
+    }
+
 # --- RISK RATING ---
 def get_risk_rating(iv, volume, days_to_expiry, strike, price):
     score = 0
@@ -145,6 +160,43 @@ def get_risk_rating(iv, volume, days_to_expiry, strike, price):
     elif score <= 7: return "🟡 Medium"
     else: return "🔴 High"
 
+# --- BUILD ONE RESULT ROW (shared by calls and puts, no duplicated logic) ---
+def build_row(best, sector, symbol, strategy, price, expiry, days_to_expiry):
+    iv = best.get("impliedVolatility", 0) or 0
+    volume = int(best["volume"]) if not pd.isna(best["volume"]) else 0
+    premium = best["bid"]
+    strike = best["strike"]
+
+    if strategy == "Covered Call":
+        capital = price                      # you own 100 shares at current price
+        breakeven = round(price - premium, 2)
+        protection = round((premium / price) * 100, 2)
+    else:
+        capital = strike                     # cash secured at the strike
+        breakeven = round(strike - premium, 2)
+        protection = round(((price - breakeven) / price) * 100, 2)
+
+    period_return = round((premium / capital) * 100, 2)
+    annualized = round(period_return * (365 / days_to_expiry), 1)
+
+    return {
+        "Sector": sector,
+        "Ticker": symbol,
+        "Strategy": strategy,
+        "Price": round(price, 2),
+        "Strike": strike,
+        "Premium": premium,
+        "IV %": round(iv * 100, 1),
+        "Expiry": expiry,
+        "Days": days_to_expiry,
+        "Period %": period_return,
+        "Annualized %": annualized,
+        "Breakeven": breakeven,
+        "Protection %": protection,
+        "Volume": volume,
+        "Risk": get_risk_rating(iv, volume, days_to_expiry, strike, price)
+    }
+
 # --- MAIN PAGE ---
 st.markdown(f"""
 <div style="margin-bottom: 1.5rem;">
@@ -160,6 +212,7 @@ if run:
     if show_puts: strategy_filter.append("Cash Secured Put")
 
     results = []
+    skipped = []
     total = sum(len(v) for v in selected.values())
     progress = st.progress(0)
     status = st.empty()
@@ -169,76 +222,45 @@ if run:
         for symbol in tickers:
             status.text(f"Checking {symbol}...")
             try:
-                ticker = yf.Ticker(symbol)
-                price = ticker.info.get("currentPrice")
-                if not price:
+                data = fetch_ticker_data(symbol, expiry_index)
+                if data is None:
+                    skipped.append(symbol)
+                    count += 1
+                    progress.progress(count / total)
                     continue
 
-                expiry = ticker.options[expiry_index]
-                days_to_expiry = (datetime.strptime(expiry, "%Y-%m-%d") - datetime.today()).days + 1
-                if days_to_expiry < 1:
-                    days_to_expiry = 1
-
-                chain = ticker.option_chain(expiry)
+                price = data["price"]
+                expiry = data["expiry"]
+                days_to_expiry = max((datetime.strptime(expiry, "%Y-%m-%d") - datetime.today()).days + 1, 1)
 
                 if "Covered Call" in strategy_filter:
-                    calls = chain.calls
-                    otm_calls = calls[calls["strike"] > price].copy()
-                    otm_calls = otm_calls[otm_calls["strike"] <= price * 1.05]
-                    otm_calls = otm_calls[otm_calls["bid"] > 0]
-                    otm_calls = otm_calls[otm_calls["volume"] >= min_volume]
-                    otm_calls = otm_calls[otm_calls["impliedVolatility"] >= min_iv / 100]
-
-                    if not otm_calls.empty:
-                        best = otm_calls.iloc[0]
-                        iv = best.get("impliedVolatility", 0)
-                        volume = int(best["volume"]) if not pd.isna(best["volume"]) else 0
-                        annual_return = round((best["bid"] / price) * (365 / days_to_expiry) * 100, 1)
-                        results.append({
-                            "Sector": sector,
-                            "Ticker": symbol,
-                            "Strategy": "Covered Call",
-                            "Price": round(price, 2),
-                            "Strike": best["strike"],
-                            "Premium": best["bid"],
-                            "IV %": round(iv * 100, 1),
-                            "Expiry": expiry,
-                            "Annual Return %": annual_return,
-                            "Volume": volume,
-                            "Risk": get_risk_rating(iv, volume, days_to_expiry, best["strike"], price)
-                        })
+                    calls = data["calls"].copy()
+                    calls["volume"] = calls["volume"].fillna(0)
+                    calls["impliedVolatility"] = calls["impliedVolatility"].fillna(0)
+                    otm = calls[(calls["strike"] > price) &
+                                (calls["strike"] <= price * 1.05) &
+                                (calls["bid"] > 0) &
+                                (calls["volume"] >= min_volume) &
+                                (calls["impliedVolatility"] >= min_iv / 100)]
+                    if not otm.empty:
+                        results.append(build_row(otm.iloc[0], sector, symbol, "Covered Call", price, expiry, days_to_expiry))
 
                 if "Cash Secured Put" in strategy_filter:
-                    puts = chain.puts
-                    otm_puts = puts[puts["strike"] < price].copy()
-                    otm_puts = otm_puts[otm_puts["strike"] >= price * 0.95]
-                    otm_puts = otm_puts[otm_puts["bid"] > 0]
-                    otm_puts = otm_puts[otm_puts["volume"] >= min_volume]
-                    otm_puts = otm_puts[otm_puts["impliedVolatility"] >= min_iv / 100]
+                    puts = data["puts"].copy()
+                    puts["volume"] = puts["volume"].fillna(0)
+                    puts["impliedVolatility"] = puts["impliedVolatility"].fillna(0)
+                    otm = puts[(puts["strike"] < price) &
+                               (puts["strike"] >= price * 0.95) &
+                               (puts["bid"] > 0) &
+                               (puts["volume"] >= min_volume) &
+                               (puts["impliedVolatility"] >= min_iv / 100)]
+                    if not otm.empty:
+                        results.append(build_row(otm.iloc[-1], sector, symbol, "Cash Secured Put", price, expiry, days_to_expiry))
 
-                    if not otm_puts.empty:
-                        best = otm_puts.iloc[-1]
-                        iv = best.get("impliedVolatility", 0)
-                        volume = int(best["volume"]) if not pd.isna(best["volume"]) else 0
-                        annual_return = round((best["bid"] / price) * (365 / days_to_expiry) * 100, 1)
-                        results.append({
-                            "Sector": sector,
-                            "Ticker": symbol,
-                            "Strategy": "Cash Secured Put",
-                            "Price": round(price, 2),
-                            "Strike": best["strike"],
-                            "Premium": best["bid"],
-                            "IV %": round(iv * 100, 1),
-                            "Expiry": expiry,
-                            "Annual Return %": annual_return,
-                            "Volume": volume,
-                            "Risk": get_risk_rating(iv, volume, days_to_expiry, best["strike"], price)
-                        })
+                time.sleep(0.5)
 
-                time.sleep(1)
-
-            except Exception as e:
-                pass
+            except Exception:
+                skipped.append(symbol)
 
             count += 1
             progress.progress(count / total)
@@ -246,26 +268,29 @@ if run:
     progress.empty()
     status.empty()
 
-    if results:
-        df = pd.DataFrame(results).sort_values("Annual Return %", ascending=False).head(25)
+    if skipped:
+        st.caption(f"Skipped (no data or rate limited): {', '.join(skipped)}")
 
-        top_return = df["Annual Return %"].max()
-        avg_return = round(df["Annual Return %"].mean(), 1)
+    if results:
+        df = pd.DataFrame(results).sort_values("Period %", ascending=False).head(25)
+
+        top = df.iloc[0]
+        avg_period = round(df["Period %"].mean(), 2)
         low_risk = len(df[df["Risk"] == "🟢 Low"])
-        best_sector = df.groupby("Sector")["Annual Return %"].mean().idxmax()
+        best_sector = df.groupby("Sector")["Period %"].mean().idxmax()
 
         col1, col2, col3, col4 = st.columns(4)
         with col1:
             st.markdown(f"""<div class="metric-card green">
-                <div class="metric-label">Top return</div>
-                <div class="metric-value">{top_return}%</div>
-                <div class="metric-sub">{df.iloc[0]["Ticker"]} {df.iloc[0]["Strategy"].lower()}</div>
+                <div class="metric-label">Top pick</div>
+                <div class="metric-value">{top["Period %"]}%</div>
+                <div class="metric-sub">{top["Ticker"]} · {top["Days"]} days · {top["Annualized %"]}% annualized</div>
             </div>""", unsafe_allow_html=True)
         with col2:
             st.markdown(f"""<div class="metric-card blue">
-                <div class="metric-label">Avg return</div>
-                <div class="metric-value">{avg_return}%</div>
-                <div class="metric-sub">Annualized across all picks</div>
+                <div class="metric-label">Avg period return</div>
+                <div class="metric-value">{avg_period}%</div>
+                <div class="metric-sub">Premium ÷ capital at risk</div>
             </div>""", unsafe_allow_html=True)
         with col3:
             st.markdown(f"""<div class="metric-card amber">
@@ -277,7 +302,7 @@ if run:
             st.markdown(f"""<div class="metric-card coral">
                 <div class="metric-label">Best sector</div>
                 <div class="metric-value">{best_sector}</div>
-                <div class="metric-sub">Highest avg return</div>
+                <div class="metric-sub">Highest avg period return</div>
             </div>""", unsafe_allow_html=True)
 
         st.markdown("<br>", unsafe_allow_html=True)
@@ -293,8 +318,16 @@ if run:
                 else:
                     st.dataframe(sector_df, use_container_width=True, hide_index=True)
 
+        # CSV download
+        csv = df.to_csv(index=False).encode("utf-8")
+        col_dl, col_share = st.columns([1, 2])
+        with col_dl:
+            st.download_button("Download CSV", csv,
+                file_name=f"premium_collector_{datetime.today().strftime('%Y%m%d')}.csv",
+                mime="text/csv")
+
         # Share bar
-        share_url = "https://options-screener-nz8kgd62xpbgfsflhwnnrs.streamlit.app"
+        share_url = "https://options-screener-nz8kgd62xpbgfsflhwnnrs.streamlit.app/"
         st.markdown(f"""
         <div style="background:#1a1d27;border-radius:12px;padding:16px 20px;border:1px solid #2a2d3a;display:flex;align-items:center;justify-content:space-between;margin-top:1rem;">
             <div>
@@ -321,9 +354,10 @@ else:
     </div>
     """, unsafe_allow_html=True)
 
+# Disclaimer — always visible
 st.markdown("""
 <div style="text-align:center;color:#6c7293;font-size:11px;margin-top:2rem;padding-top:1rem;border-top:1px solid #2a2d3a;">
-    The Premium Collector is for informational purposes only. Not financial advice. 
-    Options trading involves significant risk. Trade responsibly.
+    The Premium Collector is for informational purposes only. Not financial advice.
+    Options trading involves significant risk of loss. Data may be delayed. Trade responsibly.
 </div>
 """, unsafe_allow_html=True)
